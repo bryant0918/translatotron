@@ -16,11 +16,11 @@ from loss_function import Tacotron2Loss
 from logger import Tacotron2Logger
 from hparams import create_hparams
 
-import librosa
+# import librosa
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import soundfile as sf
-import librosa.display
+# import librosa.display
 
 
 def reduce_tensor(tensor, n_gpus):
@@ -323,8 +323,6 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 #                     checkpoint_path)
 
             iteration += 1
-
-
 
 
 if __name__ == '__main__':
