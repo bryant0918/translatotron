@@ -2,6 +2,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pylab as plt
 import numpy as np
+import librosa
+from audio_processing import dynamic_range_decompression
+import torch
 
 
 def save_figure_to_numpy(fig):
@@ -29,18 +32,24 @@ def plot_alignment_to_numpy(alignment, info=None):
     return data
 
 
-def plot_spectrogram_to_numpy(spectrogram):
-    fig, ax = plt.subplots(figsize=(12, 3))
-    im = ax.imshow(spectrogram, aspect="auto", origin="lower",
-                   interpolation='none')
-    plt.colorbar(im, ax=ax)
-    plt.xlabel("Frames")
-    plt.ylabel("Channels")
+def plot_spectrogram_to_numpy(specgram, title=None):
+    """Plot various spectrograms"""
+    # Denormalize
+    specgram = dynamic_range_decompression(torch.tensor(specgram), .2)
+
+    # Plot
+    fig, axs = plt.subplots(figsize=(12, 3))
+    axs.set_title(title or "Spectrogram (db)")
+    axs.set_ylabel("Channels")
+    axs.set_xlabel("frame")
+    im = axs.imshow(librosa.power_to_db(specgram), origin="lower", aspect="auto")
+    fig.colorbar(im, ax=axs)
     plt.tight_layout()
 
     fig.canvas.draw()
     data = save_figure_to_numpy(fig)
     plt.close()
+
     return data
 
 

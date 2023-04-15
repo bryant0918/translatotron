@@ -28,14 +28,14 @@ class LocationLayer(nn.Module):
 
 class Attention(nn.Module):
     def __init__(self, attention_rnn_dim, embedding_dim, attention_dim,
-                 attention_location_n_filters, attention_location_kernel_size,num_heads=4):
+                 attention_location_n_filters, attention_location_kernel_size, num_heads=4):
         super(Attention, self).__init__()
         self.query_layer = LinearNorm(attention_rnn_dim, attention_dim,
                                       bias=False, w_init_gain='tanh')
         self.memory_layer = LinearNorm(embedding_dim, attention_dim, bias=False,
                                        w_init_gain='tanh')
         # self.v = LinearNorm(attention_dim, 1, bias=False)
-        self.attention = nn.MultiheadAttention(attention_dim,num_heads,batch_first=True)
+        self.attention = nn.MultiheadAttention(attention_dim, num_heads, batch_first=True)
         self.location_layer = LocationLayer(attention_location_n_filters,
                                             attention_location_kernel_size,
                                             attention_dim)
@@ -88,66 +88,6 @@ class Attention(nn.Module):
 
         attention_context,attention_weights = self.attention(processed_query,processed_attention_weights,processed_memory)
         return attention_context.squeeze(1), attention_weights.squeeze(1)
-
-
-# class Attention(nn.Module):
-#     def __init__(self, attention_rnn_dim, embedding_dim, attention_dim,
-#                  attention_location_n_filters, attention_location_kernel_size):
-#         super(Attention, self).__init__()
-#         self.query_layer = LinearNorm(attention_rnn_dim, attention_dim,
-#                                       bias=False, w_init_gain='tanh')
-#         self.memory_layer = LinearNorm(embedding_dim, attention_dim, bias=False,
-#                                        w_init_gain='tanh')
-#         self.v = LinearNorm(attention_dim, 1, bias=False)
-#         self.location_layer = LocationLayer(attention_location_n_filters,
-#                                             attention_location_kernel_size,
-#                                             attention_dim)
-#         self.score_mask_value = -float("inf")
-
-#     def get_alignment_energies(self, query, processed_memory,
-#                                attention_weights_cat):
-#         """
-#         PARAMS
-#         ------
-#         query: decoder output (batch, n_mel_channels * n_frames_per_step)
-#         processed_memory: processed encoder outputs (B, T_in, attention_dim)
-#         attention_weights_cat: cumulative and prev. att weights (B, 2, max_time)
-
-#         RETURNS
-#         -------
-#         alignment (batch, max_time)
-#         """
-
-#         processed_query = self.query_layer(query.unsqueeze(1))
-#         processed_attention_weights = self.location_layer(attention_weights_cat)
-#         energies = self.v(torch.tanh(
-#             processed_query + processed_attention_weights + processed_memory))
-
-#         energies = energies.squeeze(-1)
-#         return energies
-
-#     def forward(self, attention_hidden_state, memory, processed_memory,
-#                 attention_weights_cat, mask):
-#         """
-#         PARAMS
-#         ------
-#         attention_hidden_state: attention rnn last output
-#         memory: encoder outputs
-#         processed_memory: processed encoder outputs
-#         attention_weights_cat: previous and cummulative attention weights
-#         mask: binary mask for padded data
-#         """
-#         alignment = self.get_alignment_energies(
-#             attention_hidden_state, processed_memory, attention_weights_cat)
-
-#         if mask is not None:
-#             alignment.data.masked_fill_(mask, self.score_mask_value)
-
-#         attention_weights = F.softmax(alignment, dim=1)
-#         attention_context = torch.bmm(attention_weights.unsqueeze(1), memory)
-#         attention_context = attention_context.squeeze(1)
-
-#         return attention_context, attention_weights
 
 
 class Prenet(nn.Module):
@@ -385,7 +325,7 @@ class Decoder(nn.Module):
         RETURNS
         -------
         mel_outputs:
-        gate_outpust: gate output energies
+        gate_outputs: gate output energies
         alignments:
         """
         # (T_out, B) -> (B, T_out)
@@ -530,13 +470,13 @@ class Tacotron2(nn.Module):
         self.n_frames_per_step = hparams.n_frames_per_step
         # self.embedding = nn.Embedding(
         #     hparams.n_symbols, hparams.symbols_embedding_dim)
-        self.linear = nn.Linear(hparams.n_mel_channels,hparams.encoder_embedding_dim)
+        self.linear = nn.Linear(hparams.n_mel_channels, hparams.encoder_embedding_dim)
         std = sqrt(2.0 / (hparams.n_symbols + hparams.symbols_embedding_dim))
         val = sqrt(3.0) * std  # uniform bounds for std
         # self.embedding.weight.data.uniform_(-val, val)
         self.encoder = Encoder(hparams)
         self.decoder = Decoder(hparams)
-        self.postnet = Postnet(hparams)
+        self.postnet = Postnet(hparams)  # Batch Normalization
 
     def parse_batch(self, batch):
         # # text_padded, input_lengths, mel_padded, gate_padded, \
@@ -600,12 +540,12 @@ class Tacotron2(nn.Module):
         inputs, input_lengths, mels, max_len, output_lengths = inputs
         input_lengths, output_lengths = input_lengths.data, output_lengths.data
   
-        embedded_inputs = self.linear(inputs.transpose(1,2)).transpose(1, 2)
+        embedded_inputs = self.linear(inputs.transpose(1, 2)).transpose(1, 2)
 
         encoder_outputs = self.encoder(embedded_inputs, input_lengths)
         # print(encoder_outputs.shape)
         mel_outputs, gate_outputs, alignments = self.decoder(
-            encoder_outputs, mels, input_lengths,output_lengths)
+            encoder_outputs, mels, input_lengths, output_lengths)
 
         mel_outputs_postnet = self.postnet(mel_outputs)
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet

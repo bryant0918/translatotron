@@ -28,6 +28,7 @@ class LossScaler:
         scaled_loss = loss*self.loss_scale
         scaled_loss.backward()
 
+
 class DynamicLossScaler:
 
     def __init__(self,

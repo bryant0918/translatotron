@@ -11,7 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
 from model import Tacotron2
-from data_utils import TextMelLoader, TextMelCollate
+from data_utils import MelLoader, MelCollate
 from loss_function import Tacotron2Loss
 from logger import Tacotron2Logger
 from hparams import create_hparams
@@ -21,6 +21,9 @@ import numpy as np
 # import matplotlib.pyplot as plt
 import soundfile as sf
 # import librosa.display
+
+import pandas as pd
+from pathlib import Path
 
 
 def reduce_tensor(tensor, n_gpus):
@@ -46,50 +49,61 @@ def init_distributed(hparams, n_gpus, rank, group_name):
 
 
 def prepare_dataloaders(hparams):
-    # Get data, data loaders and collate function ready
-    input_files,output_files = [],[]
-    for f in os.listdir(hparams.input_data_root):
-        input_files.append(f)
+    alignments = pd.read_csv(hparams.data_alignments_csv)
 
-    input_files.sort()
+    # Go through output_data root to get book directories and ids
+    output_files = []
+    book_ids = []
     for f in os.listdir(hparams.output_data_root):
-       if f in input_files:
-         output_files.append(f)
-    
-    output_files.sort()
-    # print(len(input_files),len(output_files))
-    for i,f in enumerate(input_files):
-      if not f in output_files:
-        input_files.pop(i)
-        # print(f)
-      else:
-        output_files[i] = os.path.join(hparams.output_data_root,f)
-        input_files[i] = os.path.join(hparams.input_data_root,f)
+        output_files.append(f)
+        book_ids.append(f[0])
 
-    # print("input")
-    # print(len(input_files),len(output_files))
-    # for i,x in enumerate(input_files):
-    #   if len(x) < 20:
-    #     del input_files[i]
-    #     del output_files[i]
-    #     i-=1
-  
-    inp,out = input_files.copy(),output_files.copy()
-    for i,j in zip(inp,out):
-      if len(i)<20:
-        input_files.remove(i)
-        output_files.remove(j)
+    # Go through all book_ids
+    input_files, output_files = [], []
+    for book_id in book_ids:
+        # Group by book directory
+        sentences = alignments[alignments['book_id'] == int(book_id)]
+        # Go through all rows and get input and output files
+        inp_files = sentences['DE_audio'].to_list()
+        out_files = sentences['EN_audio'].to_list()
 
-    # print(len(input_files),len(output_files))
-    input_files,output_files = input_files[:int(len(input_files)/2)],output_files[:int(len(input_files)/2)]
-    train_size = int(hparams.train_size*len(input_files))
-    trainset = (input_files[:train_size],output_files[:train_size])
-    valset = (input_files[train_size:],output_files[train_size:])
+        # TODO: Fix so that I'm not hard-coding .wav extension
+        input_files += [os.path.join(hparams.input_data_root, book_id, "sentence_level_audio", f,) for f in inp_files]
+        output_files += [os.path.join(hparams.output_data_root, book_id, "sentence_level_audio", f+".wav") for f in out_files]
+
+    # Double check files are in right location
+    # inp, out = input_files.copy(), output_files.copy()
+    # for i, j in zip(inp, out):
+    #     if not os.path.isfile(i) or not os.path.isfile(j):
+    #         print("Removing", i)
+    #         input_files.remove(i)
+    #         output_files.remove(j)
+
+    # Train Val Split
+    train_size = int(hparams.train_size * len(input_files))
+    test_size = int(hparams.test_size * len(input_files))
+    trainset = (input_files[:train_size], output_files[:train_size])
+    testset = (input_files[train_size:train_size+test_size], output_files[train_size:train_size+test_size])
+    valset = (input_files[train_size+test_size:], output_files[train_size+test_size:])
+
+    # for i in range(1):
+        # print(testset[0][i], testset[1][i])
+
     # trainset = TextMelLoader(hparams.training_files, hparams)
     # valset = TextMelLoader(hparams.validation_files, hparams)
-    trainset = TextMelLoader(trainset, hparams)
-    valset = TextMelLoader(valset, hparams)
-    collate_fn = TextMelCollate(hparams.n_frames_per_step)
+    trainset = MelLoader(trainset, hparams)
+    valset = MelLoader(valset, hparams)
+    testset = MelLoader(testset, hparams)
+    collate_fn = MelCollate(hparams.n_frames_per_step)
+
+
+    # i = 0
+    # for x, y in trainset:
+    #     print("x", x)
+    #     print("y", y)
+    #     i+=1
+    #     if i == 1:
+    #         break
 
     if hparams.distributed_run:
         train_sampler = DistributedSampler(trainset)
@@ -102,12 +116,13 @@ def prepare_dataloaders(hparams):
                               sampler=train_sampler,
                               batch_size=hparams.batch_size, pin_memory=False,
                               drop_last=True, collate_fn=collate_fn)
-    return train_loader, valset, collate_fn
+    return train_loader, valset, testset, collate_fn
 
 
 def prepare_directories_and_logger(output_directory, log_directory, rank):
     if rank == 0:
         if not os.path.isdir(output_directory):
+            # Make directory and change mode to read/write for everyone
             os.makedirs(output_directory)
             os.chmod(output_directory, 0o775)
         logger = Tacotron2Logger(os.path.join(output_directory, log_directory))
@@ -150,7 +165,7 @@ def load_checkpoint(checkpoint_path, model, optimizer):
     optimizer.load_state_dict(checkpoint_dict['optimizer'])
     learning_rate = checkpoint_dict['learning_rate']
     iteration = checkpoint_dict['iteration']
-    print("Loaded checkpoint '{}' from iteration {}" .format(
+    print("Loaded checkpoint '{}' from iteration {}".format(
         checkpoint_path, iteration))
     return model, optimizer, learning_rate, iteration
 
@@ -164,7 +179,7 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, filepath):
                 'learning_rate': learning_rate}, filepath)
 
 
-def validate(output_directory,model, criterion, valset, iteration, batch_size, n_gpus,
+def validate(output_directory, model, criterion, valset, iteration, batch_size, n_gpus,
              collate_fn, logger, distributed_run, rank):
     """Handles all the validation scoring and printing"""
     model.eval()
@@ -172,7 +187,7 @@ def validate(output_directory,model, criterion, valset, iteration, batch_size, n
         val_sampler = DistributedSampler(valset) if distributed_run else None
         val_loader = DataLoader(valset, sampler=val_sampler, num_workers=2,
                                 shuffle=False, batch_size=batch_size,
-                                pin_memory=False, collate_fn=collate_fn,drop_last=True)
+                                pin_memory=False, collate_fn=collate_fn, drop_last=True)
 
         val_loss = 0.0
         for i, batch in enumerate(val_loader):
@@ -231,18 +246,19 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
     if hparams.fp16_run:
         from apex import amp
+        # fp16 precision training instead of fp32 to speed up and use less RAM
         model, optimizer = amp.initialize(
             model, optimizer, opt_level='O2')
 
     if hparams.distributed_run:
+        # Distribute to multiple GPUs
         model = apply_gradient_allreduce(model)
 
     criterion = Tacotron2Loss()
 
-    logger = prepare_directories_and_logger(
-        output_directory, log_directory, rank)
+    logger = prepare_directories_and_logger(output_directory, log_directory, rank)
 
-    train_loader, valset, collate_fn = prepare_dataloaders(hparams)
+    train_loader, valset, testset, collate_fn = prepare_dataloaders(hparams)
 
     # Load checkpoint if one exists
     iteration = 1
@@ -265,23 +281,12 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     for epoch in range(epoch_offset, hparams.epochs):
         print("Epoch: {}".format(epoch))
         for i, batch in enumerate(train_loader):
-            if iteration%20 == 0:
-              iteration += 1
-              break
             start = time.perf_counter()
             for param_group in optimizer.param_groups:
                 param_group['lr'] = learning_rate
 
             model.zero_grad()
             x, y = model.parse_batch(batch)
-            # out_shape = []
-            # for a in x:
-            #   if torch.is_tensor(a):
-            #     out_shape.append(a.size())
-            #   else:
-            #     out_shape.append(1)
-
-            # print(out_shape)
             y_pred = model(x)
 
             loss = criterion(y_pred, y)
@@ -312,15 +317,16 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 logger.log_training(
                     reduced_loss, grad_norm, learning_rate, duration, iteration)
 
+            # Validation Step
             if not is_overflow and (iteration % hparams.iters_per_checkpoint == 0):
-                validate(output_directory,model, criterion, valset, iteration,
+                print("Validating...")
+                validate(output_directory, model, criterion, valset, iteration,
                          hparams.batch_size, n_gpus, collate_fn, logger,
                          hparams.distributed_run, rank)
-                # if rank == 0:
-                #     checkpoint_path = os.path.join(
-                #         output_directory, "checkpoint_{}".format(iteration))
-                #     save_checkpoint(model, optimizer, learning_rate, iteration,
-                #                     checkpoint_path)
+                # Save Checkpoint
+                if rank == 0:
+                    checkpoint_path = os.path.join(output_directory, "checkpoint_{}".format(iteration))
+                    save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path)
 
             iteration += 1
 
@@ -328,8 +334,10 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--output_directory', type=str,
+                        default='C:/Users/bryan/Documents/School/Winter 2023/CS 601R/Final Project/ckpts',
                         help='directory to save checkpoints')
     parser.add_argument('-l', '--log_directory', type=str,
+                        default='C:/Users/bryan/Documents/School/Winter 2023/CS 601R/Final Project/logs',
                         help='directory to save tensorboard logs')
     parser.add_argument('-c', '--checkpoint_path', type=str, default=None,
                         required=False, help='checkpoint path')

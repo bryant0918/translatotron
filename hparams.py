@@ -14,7 +14,7 @@ def create_hparams(hparams_string=None, verbose=False):
         # Experiment Parameters        #
         ################################
         "epochs": 500,
-        "iters_per_checkpoint": 10,
+        "iters_per_checkpoint": 100,  # Can maybe raise this to like 1000
         "seed": 1234,
         "dynamic_loss_scaling": True,
         "fp16_run": False,
@@ -36,19 +36,34 @@ def create_hparams(hparams_string=None, verbose=False):
         ################################
         # Audio Parameters             #
         ################################
-        "max_wav_value": 32768.0,
+        "max_wav_value": 1.0,  # If using a different package than soundfile you may have to set to 32768
         "sampling_rate": 22050,
         "filter_length": 1024,
-        "hop_length": 256,
+        "hop_length": 512,
         "win_length": 1024,
         "n_mel_channels": 80,
         "mel_fmin": 0.0,
         "mel_fmax": 8000.0,
 
-        # Data parameters
-        "input_data_root": 'C:/Users/bryan/Documents/School/Winter 2023/CS 601R/Final Project/Data/LibriS2S/DE',
-        "output_data_root": 'C:/Users/bryan/Documents/School/Winter 2023/CS 601R/Final Project/Data/LibriS2S/EN',
-        "train_size": 0.99,
+        ################################
+        # Data Parameters             #
+        ################################
+
+        # My Computer Paths
+        "input_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+                           'Project\\Data\\LibriS2S\\DE',
+        "output_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+                            'Project\\Data\\LibriS2S\\EN',
+        "data_alignments_csv": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+                               'Project\\Data\\LibriS2S\\alignments\\all_de_en_aligned.csv',
+
+        # Super Computer Paths
+        # "input_data_root": "/home/bmcarth4/Final Project/Data/LibriS2S/DE",
+        # "output_data_root": '/home/bmcarth4/Final Project/Data/LibriS2S/EN',
+        # "data_alignments_csv": '/home/bmcarth4/Final Project/Data/LibriS2S/alignments/all_de_en_aligned.csv',
+
+        "train_size": 0.8,
+        "test_size": .1,
         # Output Audio Parameters
         "out_channels": 1025,
         ################################
@@ -92,7 +107,7 @@ def create_hparams(hparams_string=None, verbose=False):
         "learning_rate": 1e-3,
         "weight_decay": 1e-6,
         "grad_clip_thresh": 1.0,
-        "batch_size": 4,
+        "batch_size": 1,   # Change to 1 when testing locally, 4 on GPU
         "mask_padding": True
         # set model's padded outputs to padded values
     }

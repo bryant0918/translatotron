@@ -24,6 +24,8 @@ class Tacotron2Logger(SummaryWriter):
         # plot distribution of parameters
         for tag, value in model.named_parameters():
             tag = tag.replace('.', '/')
+            # print("Tag:", tag)
+            # print("Value: ", value.data.cpu().numpy())
             self.add_histogram(tag, value.data.cpu().numpy(), iteration)
 
         # plot alignment, mel target and predicted, gate target and predicted
@@ -34,7 +36,7 @@ class Tacotron2Logger(SummaryWriter):
             iteration, dataformats='HWC')
         self.add_image(
             "mel_target",
-            plot_spectrogram_to_numpy(mel_targets[idx].data.cpu().numpy()),
+            plot_spectrogram_to_numpy(mel_targets[idx].data.cpu().numpy(), f"Step {iteration}"),
             iteration, dataformats='HWC')
         self.add_image(
             "mel_predicted",

@@ -10,3 +10,4 @@ tensorflow==1.15.2
 numpy==1.13.3
 tensorboard==2.12.0
 cmudict>=1.12.0
+pandas

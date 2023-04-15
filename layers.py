@@ -47,8 +47,8 @@ class TacotronSTFT(torch.nn.Module):
         self.n_mel_channels = n_mel_channels
         self.sampling_rate = sampling_rate
         self.stft_fn = STFT(filter_length, hop_length, win_length)
-        mel_basis = librosa_mel_fn(
-            sampling_rate, filter_length, n_mel_channels, mel_fmin, mel_fmax)
+        mel_basis = librosa_mel_fn(sr=sampling_rate, n_fft=filter_length, n_mels=n_mel_channels, fmin=mel_fmin,
+                                   fmax=mel_fmax)
         mel_basis = torch.from_numpy(mel_basis).float()
         self.register_buffer('mel_basis', mel_basis)
 
@@ -60,7 +60,7 @@ class TacotronSTFT(torch.nn.Module):
         output = dynamic_range_decompression(magnitudes)
         return output
 
-    def spectrogram(self,y):
+    def spectrogram(self, y):
         assert(torch.min(y.data) >= -1)
         assert(torch.max(y.data) <= 1)
 
@@ -83,7 +83,15 @@ class TacotronSTFT(torch.nn.Module):
         assert(torch.max(y.data) <= 1)
 
         magnitudes, phases = self.stft_fn.transform(y)
+        # print("mag", magnitudes)
+        # print("phase", phases)
         magnitudes = magnitudes.data
+        # print("Mel basis", self.mel_basis)
         mel_output = torch.matmul(self.mel_basis, magnitudes)
         mel_output = self.spectral_normalize(mel_output)
         return mel_output
+
+    def inverse_mel_to_audio(self, S):
+        """Computes audio data from mel spectrogram"""
+
+        return
