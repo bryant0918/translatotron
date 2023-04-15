@@ -1,5 +1,3 @@
-# import tensorflow as tf
-from text import symbols
 
 
 class mapDict(dict):
@@ -31,7 +29,6 @@ def create_hparams(hparams_string=None, verbose=False):
         "load_mel_from_disk": False,
         "training_files": 'data/train',
         "validation_files": 'data/val',
-        "text_cleaners": ['english_cleaners'],
 
         ################################
         # Audio Parameters             #
@@ -69,8 +66,6 @@ def create_hparams(hparams_string=None, verbose=False):
         ################################
         # Model Parameters             #
         ################################
-        "n_symbols": len(symbols),
-        "symbols_embedding_dim": 512,
 
         # Encoder parameters
         "encoder_kernel_size": 5,
@@ -113,12 +108,5 @@ def create_hparams(hparams_string=None, verbose=False):
     }
 
     hparams = mapDict(hparams)
-
-    # if hparams_string:
-    #     tf.logging.info('Parsing command line hparams: %s', hparams_string)
-    #     hparams.parse(hparams_string)
-
-    # if verbose:
-    #     tf.logging.info('Final parsed hparams: %s', hparams.values())
 
     return hparams

@@ -16,14 +16,7 @@ from loss_function import Tacotron2Loss
 from logger import Tacotron2Logger
 from hparams import create_hparams
 
-# import librosa
-import numpy as np
-# import matplotlib.pyplot as plt
-import soundfile as sf
-# import librosa.display
-
 import pandas as pd
-from pathlib import Path
 
 
 def reduce_tensor(tensor, n_gpus):

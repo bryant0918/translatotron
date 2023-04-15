@@ -2,9 +2,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import torchaudio.transforms as T
-import librosa
-import layers
-from utils import load_wav_to_torch, load_filepaths_and_text
+from utils import load_wav_to_torch
 from audio_processing import dynamic_range_compression
 
 
@@ -17,20 +15,18 @@ class MelLoader(torch.utils.data.Dataset):
     def __init__(self, audiopaths, hparams):
         self.inputs = audiopaths[0]
         self.outputs = audiopaths[1]
-        self.text_cleaners = hparams.text_cleaners
+
         self.max_wav_value = hparams.max_wav_value
         self.sampling_rate = hparams.sampling_rate
+        self.n_mel_channels = hparams.n_mel_channels
         self.load_mel_from_disk = hparams.load_mel_from_disk
-        self.stft = layers.TacotronSTFT(
-            hparams.filter_length, hparams.hop_length, hparams.win_length,
-            hparams.n_mel_channels, hparams.sampling_rate, hparams.mel_fmin,
-            hparams.mel_fmax)
+
         self.resampler = T.Resample(44100, hparams.sampling_rate)
         self.melspectrogram = T.MelSpectrogram(sample_rate=hparams.sampling_rate,
                                                n_fft=hparams.filter_length,
                                                win_length=hparams.win_length,
                                                hop_length=hparams.hop_length,
-                                               n_mels=80,
+                                               n_mels=hparams.n_mel_channels,
                                                center=True,
                                                pad_mode="reflect",
                                                power=2.0)
@@ -61,9 +57,9 @@ class MelLoader(torch.utils.data.Dataset):
 
         else:
             melspec = torch.from_numpy(np.load(filename))
-            assert melspec.size(0) == self.stft.n_mel_channels, (
+            assert melspec.size(0) == self.n_mel_channels, (
                 'Mel dimension mismatch: given {}, expected {}'.format(
-                    melspec.size(0), self.stft.n_mel_channels))
+                    melspec.size(0), self.n_mel_channels))
 
         return mel_spec
 
