@@ -1,18 +1,25 @@
 import torch
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from train import prepare_dataloaders, load_model, load_checkpoint
 from hparams import create_hparams
 import argparse
-import numpy as np
 from loss_function import Tacotron2Loss, Iso_Tacotron2Loss
-import soundfile as sf
-import librosa
-from matplotlib import pyplot as plt
-import os
+from plotting_utils import save_spectrogram
+import torchaudio
+import torchaudio.transforms as T
 
 
 def test(checkpoint_path, isochronic=False):
+    power_spec = T.InverseMelScale(n_stft=hparams.filter_length // 2 + 1,
+                                   n_mels=hparams.n_mel_channels,
+                                   sample_rate=hparams.sampling_rate,
+                                   f_min=0.0)
+
+    griffin_lim = T.GriffinLim(n_fft=hparams.filter_length,
+                               win_length=hparams.win_length,
+                               hop_length=hparams.hop_length,
+                               power=2)
+
     """Run Inference"""
     _, _, testset, collate_fn = prepare_dataloaders(hparams)
 
@@ -41,72 +48,23 @@ def test(checkpoint_path, isochronic=False):
             x, y = model.parse_batch(batch)
             # x is inputs, input_lengths, mels, max_len, output_lengths
             y_pred = model(x)
-            print("Y_PRED[1] shape", y_pred[1].shape)
-            out_sig = y_pred[1].detach().cpu().numpy()
+            print("Y_PRED[1] shape", y_pred[1].shape)  # Do I want y_pred[0] if batch size is 1?
+            out_sig = y_pred[1]
 
-            out_sig = np.squeeze(out_sig)
-            spectrogram = np.abs(out_sig)
-            # power_to_db = librosa.power_to_db(spectrogram, ref=np.max)
-            # Show Spectrogram
-            plt.figure(figsize=(16, 5))
-            librosa.display.specshow(spectrogram, sr=hparams.sampling_rate, x_axis='time', y_axis='mel', cmap='magma',
-                                     hop_length=hparams.hop_length)
-            plt.colorbar(label='dB')
-            plt.title('Mel-Spectrogram (dB)', fontdict=dict(size=18))
-            plt.xlabel('Time', fontdict=dict(size=15))
-            plt.ylabel('Frequency', fontdict=dict(size=15))
-            plt.savefig(f"Output/spectogram{i}.png") # Has correct frequency Range
-
-            # Convert Amplitude to Decibels
-            log_spectro = librosa.amplitude_to_db(spectrogram)
-            plt.figure(figsize=(16, 5))
-            librosa.display.specshow(log_spectro, sr=hparams.sampling_rate, x_axis='time', y_axis='hz',
-                                     hop_length=hparams.hop_length, cmap='magma')
-            plt.colorbar(label='Decibels')
-            plt.title('Spectrogram (dB)', fontdict=dict(size=18))
-            plt.xlabel('Time', fontdict=dict(size=15))
-            plt.ylabel('Frequency', fontdict=dict(size=15))
-            plt.savefig(f"Output/spect_amp2db{i}.png") # Incorrect frequency Range
-
-            # Convert Power to db
-            power_to_db = librosa.power_to_db(spectrogram, ref=np.max)
-            plt.figure(figsize=(16, 5))
-            librosa.display.specshow(power_to_db, sr=hparams.sampling_rate, x_axis='time', y_axis='mel', cmap='magma',
-                                     hop_length=hparams.hop_length)
-            plt.colorbar(label='dB')
-            plt.title('Mel-Spectrogram (dB)', fontdict=dict(size=18))
-            plt.xlabel('Time', fontdict=dict(size=15))
-            plt.ylabel('Frequency', fontdict=dict(size=15))
-            plt.savefig(f"Output/spect_power2db{i}.png") # Correct frequency range
-
-
-            # print(out_sig.shape)
-            # for j in range(4):
-            #   print(f"Saving figure: {j}")
-            #   plt.figure()
-            #   # librosa.display.specshow(librosa.power_to_db(S, ref=np.max),ax=ax)
-            #   plt.imshow(out_sig[j])
-            #   plt.colorbar()
-            #   # plt.show()
-            #   plt.savefig(os.path.join(output_directory,f'plot_{iteration}_{j}.png'))
-            #   # out_ = librosa.feature.inverse.mel_to_audio(out_sig[j])
-            #   # sf.write(os.path.join(output_directory,f"out_{iteration}.wav"),out_,22050)
+            # Show or save Spectrogram
+            save_spectrogram(out_sig, "Output/test/{i}_predicted.png")
 
             loss = criterion(y_pred, y)
             reduced_test_loss = loss.item()
             test_loss += reduced_test_loss
 
+            # Get waveform from spectrogram
+            powr_spec = power_spec(out_sig)  # This can handle y_pred and do the whole batch
+            reconstructed_waveform = griffin_lim(powr_spec)
+
             # Save output audio
-            # np.save(f"Output/{i}", out_sig)
-            # print(np.shape(np.squeeze(out_sig)))
-            # # print("out_sig", out_sig)
-            # sf.write(f"Output/{i}.wav", np.squeeze(out_sig), 22050, subtype='FLOAT') # TODO: Check Sampling Rate
-            # # sf.write(f"Output/{i}.flac", np.squeeze(out_sig), 22050, format='FLAC')
-            # y = librosa.feature.inverse.mel_to_audio(np.squeeze(out_sig))
-            # print("y", y)
-            # sf.write(f'Output/test{i}.wav', y, 22050)
-            # sf.write(f'Output/test{i}_float.wav', y, 22050, subtype='FLOAT')
-            # sf.write(f'Output/test{i}.flac', y, 22050, format='FLAC')
+            torchaudio.save("Output/test/{i}_predicted.wav", reconstructed_waveform, hparams.sampling_rate)
+
 
             if i == 3:
                 break

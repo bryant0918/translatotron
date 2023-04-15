@@ -12,8 +12,6 @@ def get_mask_from_lengths(lengths):
 def load_wav_to_torch(full_path):
     data, sampling_rate = torchaudio.load(full_path)
     return data, sampling_rate
-    # data, sampling_rate = sf.read(full_path)
-    # return torch.FloatTensor(data.astype(np.float32)), sampling_rate
 
 
 def load_filepaths_and_text(filename, split="|"):
