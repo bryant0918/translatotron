@@ -38,7 +38,7 @@ def plot_spectrogram_to_numpy(specgram, title=None):
     specgram = dynamic_range_decompression(torch.tensor(specgram), .2)
 
     # Plot
-    fig, axs = plt.subplots(figsize=(12, 3))
+    fig, axs = plt.subplots(figsize=(8, 2))
     axs.set_title(title or "Spectrogram (db)")
     axs.set_ylabel("Channels")
     axs.set_xlabel("frame")
@@ -54,12 +54,12 @@ def plot_spectrogram_to_numpy(specgram, title=None):
 
 
 def save_spectrogram(specgram, path="specgram", show=False):
-    """Plot and save spectrograms"""
-    # Denormalize
-    specgram = dynamic_range_decompression(specgram, .2)
+    """Plot and save spectrograms
+    Should pass in already denormalized spectrogram
+    """
 
     # Plot
-    fig, axs = plt.subplots(figsize=(12, 3))
+    fig, axs = plt.subplots(figsize=(8, 2))
     axs.set_title("Spectrogram (db)")
     axs.set_ylabel("Channels")
     axs.set_xlabel("frame")
@@ -71,7 +71,7 @@ def save_spectrogram(specgram, path="specgram", show=False):
 
 
 def plot_gate_outputs_to_numpy(gate_targets, gate_outputs):
-    fig, ax = plt.subplots(figsize=(12, 3))
+    fig, ax = plt.subplots(figsize=(8, 2))
     ax.scatter(range(len(gate_targets)), gate_targets, alpha=0.5,
                color='green', marker='+', s=1, label='target')
     ax.scatter(range(len(gate_outputs)), gate_outputs, alpha=0.5,

@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 from layers import ConvNorm, LinearNorm
 from utils import to_gpu, get_mask_from_lengths
+import numpy as np
 
 
 class LocationLayer(nn.Module):
@@ -82,9 +83,8 @@ class Prenet(nn.Module):
     def __init__(self, in_dim, sizes):
         super(Prenet, self).__init__()
         in_sizes = [in_dim] + sizes[:-1]
-        self.layers = nn.ModuleList(
-            [LinearNorm(in_size, out_size, bias=False)
-             for (in_size, out_size) in zip(in_sizes, sizes)])
+        self.layers = nn.ModuleList([LinearNorm(in_size, out_size, bias=False)
+                                     for (in_size, out_size) in zip(in_sizes, sizes)])
 
     def forward(self, x):
         for linear in self.layers:
@@ -100,6 +100,7 @@ class Postnet(nn.Module):
     def __init__(self, hparams):
         super(Postnet, self).__init__()
         self.convolutions = nn.ModuleList()
+        self.leakyrelu = torch.nn.LeakyReLU()
 
         self.convolutions.append(
             nn.Sequential(
@@ -132,8 +133,10 @@ class Postnet(nn.Module):
 
     def forward(self, x):
         for i in range(len(self.convolutions) - 1):
-            x = F.dropout(torch.tanh(self.convolutions[i](x)), 0.5, self.training)
-        x = F.dropout(self.convolutions[-1](x), 0.5, self.training)
+            # TODO: Chnage this from tanh?
+            # x = F.dropout(torch.tanh(self.convolutions[i](x)), 0.5, self.training)
+            x = self.leakyrelu(self.convolutions[i](x))
+        x = F.dropout(self.convolutions[-1](x), 0.4, self.training)
 
         return x
 
@@ -147,29 +150,40 @@ class Encoder(nn.Module):
     def __init__(self, hparams):
         super(Encoder, self).__init__()
 
+        # convolutions = []
+        # for _ in range(hparams.encoder_n_convolutions):
+        #     conv_layer = nn.Sequential(
+        #         ConvNorm(hparams.encoder_embedding_dim,
+        #                  hparams.encoder_embedding_dim,
+        #                  kernel_size=hparams.encoder_kernel_size, stride=1,
+        #                  padding=int((hparams.encoder_kernel_size - 1) / 2),
+        #                  dilation=1, w_init_gain='relu'),
+        #         nn.BatchNorm1d(hparams.encoder_embedding_dim))
+        #     convolutions.append(conv_layer)
+        # self.convolutions = nn.ModuleList(convolutions)
+
         self.lstm = nn.LSTM(hparams.encoder_embedding_dim,
-                            int(hparams.encoder_embedding_dim / 2), num_layers=1,
+                            int(hparams.encoder_embedding_dim / 2), num_layers=8,
                             batch_first=True, bidirectional=True)
 
     def forward(self, x, input_lengths):
+        # for conv in self.convolutions:
+        #     x = F.dropout(F.relu(conv(x)), 0.5, self.training)
 
         x = x.transpose(1, 2)
 
         # pytorch tensor are not reversible, hence the conversion
         input_lengths = input_lengths.cpu().numpy()
-        x = nn.utils.rnn.pack_padded_sequence(
-            x, input_lengths, batch_first=True)
+        x = nn.utils.rnn.pack_padded_sequence(x, input_lengths, batch_first=True)
 
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
 
-        outputs, _ = nn.utils.rnn.pad_packed_sequence(
-            outputs, batch_first=True)
+        outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
 
         return outputs
 
     def inference(self, x):
-
         x = x.transpose(1, 2)
 
         self.lstm.flatten_parameters()
@@ -207,9 +221,13 @@ class Decoder(nn.Module):
             hparams.attention_dim, hparams.attention_location_n_filters,
             hparams.attention_location_kernel_size)
 
-        self.decoder_rnn = nn.LSTMCell(
-            hparams.attention_rnn_dim + hparams.encoder_embedding_dim,
-            hparams.decoder_rnn_dim, 1)
+        # self.decoder_rnn = nn.LSTMCell(
+        #     hparams.attention_rnn_dim + hparams.encoder_embedding_dim,
+        #     hparams.decoder_rnn_dim, 1)
+        # print("IN LSTM", hparams.attention_rnn_dim + hparams.encoder_embedding_dim)
+        # print(hparams.decoder_rnn_dim)
+        self.decoder_rnn = nn.LSTM(hparams.attention_rnn_dim + hparams.encoder_embedding_dim,
+                                    hparams.decoder_rnn_dim, 4, batch_first=False)
 
         self.linear_projection = LinearNorm(
             hparams.decoder_rnn_dim + hparams.encoder_embedding_dim,
@@ -245,16 +263,22 @@ class Decoder(nn.Module):
         """
         B = memory.size(0)
         MAX_TIME = memory.size(1)
+        # print("B IS", B)
 
         self.attention_hidden = Variable(memory.data.new(
             B, self.attention_rnn_dim).zero_())
         self.attention_cell = Variable(memory.data.new(
             B, self.attention_rnn_dim).zero_())
 
-        self.decoder_hidden = Variable(memory.data.new(
-            B, self.decoder_rnn_dim).zero_())
-        self.decoder_cell = Variable(memory.data.new(
-            B, self.decoder_rnn_dim).zero_())
+        self.decoder_hidden = torch.zeros((4, B, self.decoder_rnn_dim), requires_grad=True,
+                                          device='cuda')
+        self.decoder_cell = torch.zeros((4, B, self.decoder_rnn_dim), requires_grad=True,
+                                        device='cuda')
+
+        # self.decoder_hidden = Variable(memory.data.new(
+        #     4, B, self.decoder_rnn_dim).zero_())
+        # self.decoder_cell = Variable(memory.data.new(
+        #     4, B, self.decoder_rnn_dim).zero_())
 
         self.attention_weights = Variable(memory.data.new(
             B, MAX_TIME).zero_())
@@ -331,29 +355,29 @@ class Decoder(nn.Module):
         cell_input = torch.cat((decoder_input, self.attention_context), -1)
         self.attention_hidden, self.attention_cell = self.attention_rnn(
             cell_input, (self.attention_hidden, self.attention_cell))
-        self.attention_hidden = F.dropout(
-            self.attention_hidden, self.p_attention_dropout, self.training)
+        self.attention_hidden = F.dropout(self.attention_hidden, self.p_attention_dropout, self.training)
 
-        attention_weights_cat = torch.cat(
-            (self.attention_weights.unsqueeze(1),
-             self.attention_weights_cum.unsqueeze(1)), dim=1)
+        attention_weights_cat = torch.cat((self.attention_weights.unsqueeze(1),
+                                           self.attention_weights_cum.unsqueeze(1)), dim=1)
         self.attention_context, self.attention_weights = self.attention_layer(
             self.attention_hidden, self.memory, self.processed_memory,
             attention_weights_cat, self.mask)
 
         # print(self.attention_context.shape,self.attention_weights.shape)
         self.attention_weights_cum += self.attention_weights
-        decoder_input = torch.cat(
-            (self.attention_hidden, self.attention_context), -1)
-        self.decoder_hidden, self.decoder_cell = self.decoder_rnn(
-            decoder_input, (self.decoder_hidden, self.decoder_cell))
-        self.decoder_hidden = F.dropout(
-            self.decoder_hidden, self.p_decoder_dropout, self.training)
+        decoder_input = torch.cat((self.attention_hidden, self.attention_context), -1)
 
-        decoder_hidden_attention_context = torch.cat(
-            (self.decoder_hidden, self.attention_context), dim=1)
-        decoder_output = self.linear_projection(
-            decoder_hidden_attention_context)
+        # print("Above decoder")
+        # print(decoder_input.unsqueeze(0).shape, self.decoder_hidden.shape, self.decoder_cell.shape)
+        # Should return out, then hidden
+        self.decoder_out, (self.decoder_hidden, self.decoder_cell) = self.decoder_rnn(
+            decoder_input.unsqueeze(0), (self.decoder_hidden, self.decoder_cell))
+        self.decoder_hidden = F.dropout(self.decoder_hidden, self.p_decoder_dropout, self.training)
+
+        # print("Before last cat", self.decoder_hidden.shape)
+        # print(self.decoder_out.squeeze(0).shape)
+        decoder_hidden_attention_context = torch.cat((self.decoder_out.squeeze(0), self.attention_context), dim=1)
+        decoder_output = self.linear_projection(decoder_hidden_attention_context)
 
         gate_prediction = self.gate_layer(decoder_hidden_attention_context)
         return decoder_output, gate_prediction, self.attention_weights
@@ -376,18 +400,20 @@ class Decoder(nn.Module):
         decoder_input = self.get_go_frame(memory).unsqueeze(0)
         decoder_inputs = self.parse_decoder_inputs(decoder_inputs)
         decoder_inputs = torch.cat((decoder_input, decoder_inputs), dim=0)
+
         decoder_inputs = self.prenet(decoder_inputs)
-        self.initialize_decoder_states(
-            memory, mask=~get_mask_from_lengths(memory_lengths))
+        # print("Decoder inputs after prenet", decoder_inputs.shape)
+        self.initialize_decoder_states(memory, mask=~get_mask_from_lengths(memory_lengths))
         # print(decoder_inputs.shape)
         mel_outputs, gate_outputs, alignments = [], [], []
         while len(mel_outputs) < decoder_inputs.size(0) - 1:
             decoder_input = decoder_inputs[len(mel_outputs)]
-            mel_output, gate_output, attention_weights = self.decode(
-                decoder_input)
+            # print("Decoder input before decode", decoder_input.shape)
+            mel_output, gate_output, attention_weights = self.decode(decoder_input)
             mel_outputs += [mel_output.squeeze(1)]
             gate_outputs += [gate_output.squeeze(1)]
             alignments += [attention_weights]
+        # print("Alignments", alignments)
 
         mel_outputs, gate_outputs, alignments = self.parse_decoder_outputs(
             mel_outputs, gate_outputs, alignments)
@@ -452,7 +478,7 @@ class Tacotron2(nn.Module):
         input_padded = to_gpu(input_padded).float()
         input_lengths = to_gpu(input_lengths).long()
         max_len = torch.max(input_lengths.data).item()
-        mel_padded = to_gpu(mel_padded).float()
+        mel_padded = to_gpu(mel_padded).float()  # Why does mel_padded get returned with x??
         gate_padded = to_gpu(gate_padded).float()
         output_lengths = to_gpu(output_lengths).long()
 
@@ -472,19 +498,40 @@ class Tacotron2(nn.Module):
         return outputs
 
     def forward(self, inputs):
-
         inputs, input_lengths, mels, max_len, output_lengths = inputs
+        # print("Inputs", inputs.shape)
+        # print(np.max(inputs.detach().cpu().numpy()))
+        # print(np.min(inputs.detach().cpu().numpy()))
         input_lengths, output_lengths = input_lengths.data, output_lengths.data
-
+        # print("Inputs transposed", inputs.transpose(1, 2).shape)
+        # Maybe get rid of this linear layer...
         embedded_inputs = self.linear(inputs.transpose(1, 2)).transpose(1, 2)
+        # print("Embedded Inputs", embedded_inputs.shape)
+        # print(np.max(embedded_inputs.detach().cpu().numpy()))
+        # print(np.min(embedded_inputs.detach().cpu().numpy()))
 
         encoder_outputs = self.encoder(embedded_inputs, input_lengths)
+        # print("encoder_outputs", encoder_outputs.shape)
+        # print(np.max(encoder_outputs.detach().cpu().numpy()))
+        # print(np.min(encoder_outputs.detach().cpu().numpy()))
         # print(encoder_outputs.shape)
         mel_outputs, gate_outputs, alignments = self.decoder(
             encoder_outputs, mels, input_lengths, output_lengths)
+        # print("mel_outputs", mel_outputs.shape)
+        # print(np.max(mel_outputs.detach().cpu().numpy()))
+        # print(np.min(mel_outputs.detach().cpu().numpy()))
 
+        # TODO: postnet uses tanh, see if mel_outputs has lots of 0's
+        # print(torch.max(mel_outputs))
+        # print(torch.min(mel_outputs))
         mel_outputs_postnet = self.postnet(mel_outputs)
+        # print("mel_outputs_postnet", mel_outputs_postnet.shape)
+        # print(np.max(mel_outputs_postnet.detach().cpu().numpy()))
+        # print(np.min(mel_outputs_postnet.detach().cpu().numpy()))
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
+        # print("mel_outputs_postnet", mel_outputs_postnet.shape)
+        # print(np.max(mel_outputs_postnet.detach().cpu().numpy()))
+        # print(np.min(mel_outputs_postnet.detach().cpu().numpy()))
 
         return self.parse_output(
             [mel_outputs, mel_outputs_postnet, gate_outputs, alignments],

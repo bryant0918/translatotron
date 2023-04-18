@@ -35,10 +35,6 @@ class MelLoader(torch.utils.data.Dataset):
         inputs = self.get_mel(self.inputs[index])
         outputs = self.get_mel(self.outputs[index])
 
-        # Normalize
-        inputs = dynamic_range_compression(inputs, .2)
-        outputs = dynamic_range_compression(outputs, .2)
-
         return inputs, outputs
 
     def get_mel(self, filename):
@@ -82,44 +78,52 @@ class MelCollate():
         PARAMS
         ------
         batch: [input mel_normalized, output mel_normalized]
+
+        RETURNS:
+        normed_padded_input,
+        input_lengths,
+        normed_padded_output,
+        gate_padded,
+        output_lengths
         """
 
-        # Right zero-pad mel-spec
+        # Right zero-pad input mel-spec
         num_mels = batch[0][0].size(0)
         input_lengths, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([x[0].size(1) for x in batch]),
-            dim=0, descending=True)
+            torch.LongTensor([x[0].size(1) for x in batch]), dim=0, descending=True)
         max_input_len = input_lengths[0]
         if max_input_len % self.n_frames_per_step != 0:
             max_input_len += self.n_frames_per_step - max_input_len % self.n_frames_per_step
             assert max_input_len % self.n_frames_per_step == 0
 
-        # include mel padded and gate padded
+        # input padded
         input_padded = torch.FloatTensor(len(batch), num_mels, max_input_len)
         input_padded.zero_()
-        # gate_padded = torch.FloatTensor(len(batch), max_target_len)
-        # gate_padded.zero_()
         for i in ids_sorted_decreasing:
             mel = batch[i][0]
             input_padded[i, :, :mel.size(1)] = mel
-            # gate_padded[i, mel.size(1)-1:] = 1
 
+        # Right zero pad Output mel-specs
         num_mels = batch[0][1].size(0)
         max_target_len = max([x[1].size(1) for x in batch])
         if max_target_len % self.n_frames_per_step != 0:
             max_target_len += self.n_frames_per_step - max_target_len % self.n_frames_per_step
             assert max_target_len % self.n_frames_per_step == 0
 
-        # include mel padded and gate padded
-        mel_padded = torch.FloatTensor(len(batch), num_mels, max_target_len)
-        mel_padded.zero_()
+        # Output padded and gate
+        output_padded = torch.FloatTensor(len(batch), num_mels, max_target_len)
+        output_padded.zero_()
         gate_padded = torch.FloatTensor(len(batch), max_target_len)
         gate_padded.zero_()
         output_lengths = torch.LongTensor(len(batch))
         for i in ids_sorted_decreasing:
             mel = batch[i][1]
-            mel_padded[i, :, :mel.size(1)] = mel
+            output_padded[i, :, :mel.size(1)] = mel
             gate_padded[i, mel.size(1) - 1:] = 1
             output_lengths[i] = mel.size(1)
 
-        return input_padded, input_lengths, mel_padded, gate_padded, output_lengths
+        # Normalize
+        normed_padded_input = dynamic_range_compression(input_padded, .2)
+        normed_padded_output = dynamic_range_compression(output_padded, .2)
+
+        return normed_padded_input, input_lengths, normed_padded_output, gate_padded, output_lengths

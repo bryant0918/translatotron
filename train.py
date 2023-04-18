@@ -3,6 +3,7 @@ import time
 import argparse
 import math
 from numpy import finfo
+import numpy as np
 
 import torch
 from distributed import apply_gradient_allreduce
@@ -17,6 +18,8 @@ from logger import Tacotron2Logger
 from hparams import create_hparams
 
 import pandas as pd
+from plotting_utils import save_spectrogram
+from audio_processing import dynamic_range_decompression
 
 
 def reduce_tensor(tensor, n_gpus):
@@ -79,6 +82,13 @@ def prepare_dataloaders(hparams):
     testset = (input_files[train_size:train_size+test_size], output_files[train_size:train_size+test_size])
     valset = (input_files[train_size+test_size:], output_files[train_size+test_size:])
 
+    i = 0
+    for x in trainset:
+        print("x", x[0])
+        i += 1
+        if i == 2:
+            break
+
     # for i in range(1):
         # print(testset[0][i], testset[1][i])
 
@@ -87,6 +97,7 @@ def prepare_dataloaders(hparams):
     trainset = MelLoader(trainset, hparams)
     valset = MelLoader(valset, hparams)
     testset = MelLoader(testset, hparams)
+
     collate_fn = MelCollate(hparams.n_frames_per_step)
 
 
@@ -105,6 +116,7 @@ def prepare_dataloaders(hparams):
         train_sampler = None
         shuffle = True
 
+    # TODO: change to shuffle
     train_loader = DataLoader(trainset, num_workers=2, shuffle=shuffle,
                               sampler=train_sampler,
                               batch_size=hparams.batch_size, pin_memory=False,
@@ -181,23 +193,20 @@ def validate(output_directory, model, criterion, valset, iteration, batch_size, 
         val_loader = DataLoader(valset, sampler=val_sampler, num_workers=2,
                                 shuffle=False, batch_size=batch_size,
                                 pin_memory=False, collate_fn=collate_fn, drop_last=True)
+        # val_loader = valset
 
+        # print(len(val_loader))
         val_loss = 0.0
         for i, batch in enumerate(val_loader):
+
             x, y = model.parse_batch(batch)
-            y_pred = model(x)
-            out_sig = y_pred[1].detach().cpu().numpy()
-            # print(out_sig.shape)
-            # for j in range(4):
-            #   print(f"Saving figure: {j}")
-            #   plt.figure()
-            #   # librosa.display.specshow(librosa.power_to_db(S, ref=np.max),ax=ax)
-            #   plt.imshow(out_sig[j])
-            #   plt.colorbar()
-            #   # plt.show()
-            #   plt.savefig(os.path.join(output_directory,f'plot_{iteration}_{j}.png'))
-            #   # out_ = librosa.feature.inverse.mel_to_audio(out_sig[j])
-            #   # sf.write(os.path.join(output_directory,f"out_{iteration}.wav"),out_,22050)
+            y_pred = model(x) # mel_out, mel_out_postnet, gate_out, _ = model_output
+            # out_sig = y_pred[1].detach().cpu().numpy()
+            # real_sig = y[0].detach().cpu().numpy()
+            # real_sig = dynamic_range_decompression(real_sig)
+            #
+            # save_spectrogram(real_sig[0], show=True)
+            # save_spectrogram(out_sig[0], show=True)
 
             loss = criterion(y_pred, y)
             if distributed_run:
@@ -205,6 +214,8 @@ def validate(output_directory, model, criterion, valset, iteration, batch_size, 
             else:
                 reduced_val_loss = loss.item()
             val_loss += reduced_val_loss
+
+
         val_loss = val_loss / (i + 1)
 
     model.train()
@@ -236,6 +247,9 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     learning_rate = hparams.learning_rate
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
                                  weight_decay=hparams.weight_decay)
+
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-5, max_lr=1e-3, mode="exp_range",
+                                                  cycle_momentum=False)
 
     if hparams.fp16_run:
         from apex import amp
@@ -279,8 +293,9 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                 param_group['lr'] = learning_rate
 
             model.zero_grad()
-            x, y = model.parse_batch(batch)
-            y_pred = model(x)
+            x, y = model.parse_batch(batch) # input_padded, input_lengths, mel_padded, gate_padded, output_lengths = batch
+
+            y_pred = model(x) # inputs, input_lengths, mels, max_len, output_lengths = inputs
 
             loss = criterion(y_pred, y)
             if hparams.distributed_run:
@@ -298,21 +313,25 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                     amp.master_params(optimizer), hparams.grad_clip_thresh)
                 is_overflow = math.isnan(grad_norm)
             else:
+                # torch.nn.utils.clip_grad_value_(model.parameters(), 5.0)
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), hparams.grad_clip_thresh)
 
             optimizer.step()
 
+            # Step learning rate
+            scheduler.step()
+
             if not is_overflow and rank == 0:
                 duration = time.perf_counter() - start
                 print("Train loss {} {:.6f} Grad Norm {:.6f} {:.2f}s/it".format(
                     iteration, reduced_loss, grad_norm, duration))
-                logger.log_training(
-                    reduced_loss, grad_norm, learning_rate, duration, iteration)
+                logger.log_training(reduced_loss, grad_norm, learning_rate, duration, iteration)
 
             # Validation Step
             if not is_overflow and (iteration % hparams.iters_per_checkpoint == 0):
                 print("Validating...")
+                # TODO: Change back to valset
                 validate(output_directory, model, criterion, valset, iteration,
                          hparams.batch_size, n_gpus, collate_fn, logger,
                          hparams.distributed_run, rank)
@@ -322,6 +341,8 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
                     save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path)
 
             iteration += 1
+
+
 
 
 if __name__ == '__main__':
@@ -351,10 +372,11 @@ if __name__ == '__main__':
     torch.backends.cudnn.enabled = hparams.cudnn_enabled
     torch.backends.cudnn.benchmark = hparams.cudnn_benchmark
 
-    print("FP16 Run:", hparams.fp16_run)
-    print("Dynamic Loss Scaling:", hparams.dynamic_loss_scaling)
+    # print("FP16 Run:", hparams.fp16_run)
+    # print("Dynamic Loss Scaling:", hparams.dynamic_loss_scaling)
     print("Distributed Run:", hparams.distributed_run)
     print("cuDNN Enabled:", hparams.cudnn_enabled)
+    print("Batch size:", hparams.batch_size)
 
     train(args.output_directory, args.log_directory, args.checkpoint_path,
           args.warm_start, args.n_gpus, args.rank, args.group_name, hparams)

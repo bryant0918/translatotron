@@ -7,6 +7,7 @@ from loss_function import Tacotron2Loss, Iso_Tacotron2Loss
 from plotting_utils import save_spectrogram
 import torchaudio
 import torchaudio.transforms as T
+from audio_processing import dynamic_range_decompression
 
 
 def test(checkpoint_path, isochronic=False):
@@ -47,9 +48,12 @@ def test(checkpoint_path, isochronic=False):
         for i, batch in enumerate(test_loader):
             x, y = model.parse_batch(batch)
             # x is inputs, input_lengths, mels, max_len, output_lengths
-            y_pred = model(x)
-            print("Y_PRED[1] shape", y_pred[1].shape)  # Do I want y_pred[0] if batch size is 1?
-            out_sig = y_pred[1]
+            # y_pred = model(x)
+            y_pred = model.inference(x[0])
+            print("Y_PRED[1] shape", y_pred.shape)  # Do I want y_pred[0] if batch size is 1?
+
+            # Get denormalized signal for visualization and audio
+            out_sig = dynamic_range_decompression(y_pred, .2)
 
             # Show or save Spectrogram
             save_spectrogram(out_sig, "Output/test/{i}_predicted.png")

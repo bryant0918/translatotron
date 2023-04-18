@@ -12,7 +12,7 @@ def create_hparams(hparams_string=None, verbose=False):
         # Experiment Parameters        #
         ################################
         "epochs": 500,
-        "iters_per_checkpoint": 100,  # Can maybe raise this to like 1000
+        "iters_per_checkpoint": 200,  # Can maybe raise this to like 1000
         "seed": 1234,
         "dynamic_loss_scaling": True,
         "fp16_run": False,
@@ -47,20 +47,20 @@ def create_hparams(hparams_string=None, verbose=False):
         ################################
 
         # My Computer Paths
-        "input_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
-                           'Project\\Data\\LibriS2S\\DE',
-        "output_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
-                            'Project\\Data\\LibriS2S\\EN',
-        "data_alignments_csv": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
-                               'Project\\Data\\LibriS2S\\alignments\\all_de_en_aligned.csv',
+        # "input_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+        #                    'Project\\Data\\LibriS2S\\DE',
+        # "output_data_root": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+        #                     'Project\\Data\\LibriS2S\\EN',
+        # "data_alignments_csv": 'C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final '
+        #                        'Project\\Data\\LibriS2S\\alignments\\all_de_en_aligned.csv',
 
         # Super Computer Paths
-        # "input_data_root": "/home/bmcarth4/Final Project/Data/LibriS2S/DE",
-        # "output_data_root": '/home/bmcarth4/Final Project/Data/LibriS2S/EN',
-        # "data_alignments_csv": '/home/bmcarth4/Final Project/Data/LibriS2S/alignments/all_de_en_aligned.csv',
+        "input_data_root": "/home/bmcarth4/Final Project/Data/LibriS2S/DE",
+        "output_data_root": '/home/bmcarth4/Final Project/Data/LibriS2S/EN',
+        "data_alignments_csv": '/home/bmcarth4/Final Project/Data/LibriS2S/alignments/all_de_en_aligned.csv',
 
         "train_size": 0.8,
-        "test_size": .1,
+        "test_size": .15,
         # Output Audio Parameters
         "out_channels": 1025,
         ################################
@@ -99,10 +99,10 @@ def create_hparams(hparams_string=None, verbose=False):
         # Optimization Hyperparameters #
         ################################
         "use_saved_learning_rate": False,
-        "learning_rate": 1e-3,
+        "learning_rate": 2e-3,
         "weight_decay": 1e-6,
         "grad_clip_thresh": 1.0,
-        "batch_size": 1,   # Change to 1 when testing locally, 4 on GPU
+        "batch_size": 4,   # Change to 1 when testing locally, 4 on GPU
         "mask_padding": True
         # set model's padded outputs to padded values
     }
