@@ -69,7 +69,7 @@ def infer(checkpoint_path, audiofile, out_dir):
 
 
 if __name__ == "__main__":
-    ckpt_path = "C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final Project\\ckpts\\checkpoint_970"
+    ckpt_path = "C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final Project\\ckpts\\checkpoint_990"
     audiofile = "C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final Project\\Data\\LibriS2S\\DE\\9\\sentence_level_audio\\00001-das_bildnis_4.flac"
     out_dir = "C:\\Users\\bryan\\Documents\\School\\Winter 2023\\CS 601R\\Final Project\\Output\\inference"
 
