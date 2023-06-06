@@ -1,7 +1,6 @@
 import torch
 from train import load_model, load_checkpoint
 from hparams import create_hparams
-from loss_function import Tacotron2Loss, Iso_Tacotron2Loss
 from plotting_utils import save_spectrogram
 import torchaudio
 import torchaudio.transforms as T
@@ -40,6 +39,7 @@ def infer(checkpoint_path, audiofile, out_dir):
     mel_spec = melspectrogram(audio)
     mel_spec_normed = dynamic_range_compression(mel_spec)
 
+
     model = load_model(hparams)
     optimizer = torch.optim.Adam(model.parameters(), lr=hparams.learning_rate,
                                  weight_decay=hparams.weight_decay)
@@ -49,21 +49,21 @@ def infer(checkpoint_path, audiofile, out_dir):
     """Run Inference"""
     model.eval()
     with torch.no_grad():
-        mel_pred, mel_postnet, gate, alignments = model.inference(mel_spec_normed[0])
+        mel_pred, mel_postnet, gate, alignments = model.inference(mel_spec_normed.to('cuda'))
         print("mel_pred shape", mel_pred.shape)
 
         # Get denormalized signal for visualization and audio
-        out_sig = dynamic_range_decompression(mel_pred, .2)
+        out_sig = dynamic_range_decompression(mel_pred, .2).cpu()
 
         # Show or save Spectrogram
-        save_spectrogram(out_sig, os.path.join(out_dir, "mel_spec.png"))
+        save_spectrogram(out_sig[0], os.path.join(out_dir, "mel_spec2.png"))
 
-        # Get waveform from spectrogram
-        powr_spec = power_spec(out_sig)
-        reconstructed_waveform = griffin_lim(powr_spec)
+    # Get waveform from spectrogram
+    powr_spec = power_spec(out_sig)
+    reconstructed_waveform = griffin_lim(powr_spec)
 
-        # Save output audio
-        torchaudio.save(os.path.join(out_dir, "predicted_audio.wav"), reconstructed_waveform, hparams.sampling_rate)
+    # Save output audio
+    torchaudio.save(os.path.join(out_dir, "predicted_audio2.wav"), reconstructed_waveform, hparams.sampling_rate)
 
     return
 

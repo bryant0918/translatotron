@@ -82,6 +82,10 @@ def prepare_dataloaders(hparams):
     testset = (input_files[train_size:train_size+test_size], output_files[train_size:train_size+test_size])
     valset = (input_files[train_size+test_size:], output_files[train_size+test_size:])
 
+    print(len(trainset[0]))
+    print(len(valset[0]))
+    print(len(testset[0]))
+
     i = 0
     for x in trainset:
         print("x", x[0])
@@ -97,6 +101,10 @@ def prepare_dataloaders(hparams):
     trainset = MelLoader(trainset, hparams)
     valset = MelLoader(valset, hparams)
     testset = MelLoader(testset, hparams)
+
+    print(len(trainset))
+    print(len(valset))
+    print(len(testset))
 
     collate_fn = MelCollate(hparams.n_frames_per_step)
 
@@ -189,11 +197,11 @@ def validate(output_directory, model, criterion, valset, iteration, batch_size, 
     """Handles all the validation scoring and printing"""
     model.eval()
     with torch.no_grad():
-        val_sampler = DistributedSampler(valset) if distributed_run else None
-        val_loader = DataLoader(valset, sampler=val_sampler, num_workers=2,
-                                shuffle=False, batch_size=batch_size,
-                                pin_memory=False, collate_fn=collate_fn, drop_last=True)
-        # val_loader = valset
+        # val_sampler = DistributedSampler(valset) if distributed_run else None
+        # val_loader = DataLoader(valset, sampler=val_sampler, num_workers=2,
+        #                         shuffle=False, batch_size=batch_size,
+        #                         pin_memory=False, collate_fn=collate_fn, drop_last=True)
+        val_loader = valset
 
         # print(len(val_loader))
         val_loss = 0.0
@@ -214,6 +222,9 @@ def validate(output_directory, model, criterion, valset, iteration, batch_size, 
             else:
                 reduced_val_loss = loss.item()
             val_loss += reduced_val_loss
+
+            # # TODO: Delete for training
+            # break
 
 
         val_loss = val_loss / (i + 1)
@@ -248,7 +259,7 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
                                  weight_decay=hparams.weight_decay)
 
-    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-6, max_lr=1e-4, mode="exp_range",
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=1e-4, max_lr=1e-3, mode="exp_range",
                                                   cycle_momentum=False)
 
     if hparams.fp16_run:
@@ -342,8 +353,8 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
             iteration += 1
 
-
-
+            # # TODO: Delete for training
+            # break
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
